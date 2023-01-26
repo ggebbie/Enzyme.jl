@@ -61,7 +61,8 @@
 
 # Let's first add the necessary packages to run everything 
 
-using Enzyme 
+using Enzyme
+using Unitful
 
 # ## Initialize constants
 
