@@ -1,65 +1,66 @@
-# # Enzyme for adjoint tutorial: Stommel three-box ocean model
+#= Enzyme for adjoint tutorial: Stommel three-box ocean model
 
-# The goal of this tutorial is to teach about a specific usage of Enzyme's automatic 
-# differentiation capabilities, and will be centered around the Stommel ocean model. This 
-# is a nice example to see how powerful Enzyme is, and the ability of it to take a 
-# derivative of a complicated function (namely one that has many parts and parameters).
-# This tutorial will focus first on the computations and getting Enzyme running, 
-# for those interested a mathematical explanation of the model and what an adjoint 
-# variable is will be provided at the end. 
+The goal of this tutorial is to teach about a specific usage of Enzyme's automatic 
+differentiation capabilities, and will be centered around the Stommel ocean model. This 
+is a nice example to see how powerful Enzyme is, and the ability of it to take a 
+derivative of a complicated function (namely one that has many parts and parameters).
+This tutorial will focus first on the computations and getting Enzyme running, 
+for those interested a mathematical explanation of the model and what an adjoint 
+variable is will be provided at the end. 
 
-# # Brief model overview 
+# Brief model overview 
 
-# The Stommel box model can be viewed as a watered down full ocean model. In our example, we have three
-# boxes (Box One, Box Two, and Box Three) and we model the transport of fluid between 
-# them. The full equations of our system are given by:
-#
-# ```math
-# \begin{aligned}
-#    U &= u_0 \left\{ \rho_2 - \left[ \rho_1 + (1 - \delta) \rho_3 \right] \right\} \\
-#    \rho_i &= -\alpha T_i + \beta S_i, \; \; \; \; i = 1, 2, 3
-# \end{aligned}
-# ```
-#
-# for the **transport** U and **densities** ``\rho``, and then the time derivatives
-#
-# ```math
-# \begin{aligned}
-#    \dot{T_1} &= U(T_3 - T_1)/V_1 + \gamma (T_1^* - T_1 ) & \dot{S_1} &= U(S_3 - S_1)/V_1 + FW_1/V_1 \\
-#    \dot{T_2} &= U(T_1 - T_2)/V_2 + \gamma (T_2^* - T_2 ) & \dot{S_2} &= U(S_1 - S_2)/V_2 + FW_2/V_2 \\
-#    \dot{T_3} &= U(T_2 - T_3)/V_3 & \dot{S_3} &= U(S_2 - S_3)/V_3 
-# \end{aligned}
-# ```
-#
-# for positive transport, ``U > 0``, and 
-#
-# ```math
-# \begin{aligned}
-#    \dot{T_1} &= U(T_2 - T_1)/V_1 + \gamma (T_1^* - T_1) & \dot{S_1} &= U(S_2 - S_1)/V_1 + FW_1/V_1 \\
-#    \dot{T_2} &= U(T_3 - T_2)/V_2 + \gamma (T_2^* - T_2 ) & \dot{S_2} &= U(S_3 - S_2)/V_2 + FW_2/V_2 \\
-#    \dot{T_3} &= U(T_1 - T_3)/V_3 & \dot{S_3} &= U(S_1 - S_3)/V_3 
-# \end{aligned}
-# ```
-#
-# for ``U \leq 0``.
-# The only force driving our system is a density gradient generated via temperature
-# and salinity differences between the boxes. This makes it a really easy 
-# model to play around with! With this in mind, the model is run 
-# forward with the steps:
-#
-# 1) Compute densities
-# 2) Compute transport 
-# 3) Compute time derivatives of the box temperatures and salinities
-# 4) Update the state vector
-#
-# We'll start by going through the model setup step by step, then providing a few test 
-# cases with Enzyme.  
+The Stommel box model can be viewed as a watered down full ocean model. In our example, we have three
+boxes (Box One, Box Two, and Box Three) and we model the transport of fluid between 
+them. The full equations of our system are given by:
 
-# # Model setup 
+```math
+\begin{aligned}
+   U &= u_0 \left\{ \rho_2 - \left[ \rho_1 + (1 - \delta) \rho_3 \right] \right\} \\
+   \rho_i &= -\alpha T_i + \beta S_i, \; \; \; \; i = 1, 2, 3
+\end{aligned}
+```
 
-# ## Model dependencies
+for the **transport** U and **densities** ``\rho``, and then the time derivatives
+
+```math
+\begin{aligned}
+   \dot{T_1} &= U(T_3 - T_1)/V_1 + \gamma (T_1^* - T_1 ) & \dot{S_1} &= U(S_3 - S_1)/V_1 + FW_1/V_1 \\
+   \dot{T_2} &= U(T_1 - T_2)/V_2 + \gamma (T_2^* - T_2 ) & \dot{S_2} &= U(S_1 - S_2)/V_2 + FW_2/V_2 \\
+   \dot{T_3} &= U(T_2 - T_3)/V_3 & \dot{S_3} &= U(S_2 - S_3)/V_3 
+\end{aligned}
+```
+
+for positive transport, ``U > 0``, and 
+
+```math
+\begin{aligned}
+   \dot{T_1} &= U(T_2 - T_1)/V_1 + \gamma (T_1^* - T_1) & \dot{S_1} &= U(S_2 - S_1)/V_1 + FW_1/V_1 \\
+   \dot{T_2} &= U(T_3 - T_2)/V_2 + \gamma (T_2^* - T_2 ) & \dot{S_2} &= U(S_3 - S_2)/V_2 + FW_2/V_2 \\
+   \dot{T_3} &= U(T_1 - T_3)/V_3 & \dot{S_3} &= U(S_1 - S_3)/V_3 
+\end{aligned}
+```
+
+for ``U \leq 0``.
+The only force driving our system is a density gradient generated via temperature
+and salinity differences between the boxes. This makes it a really easy 
+model to play around with! With this in mind, the model is run 
+forward with the steps:
+
+1) Compute densities
+2) Compute transport 
+3) Compute time derivatives of the box temperatures and salinities
+4) Update the state vector
+
+We'll start by going through the model setup step by step, then providing a few test 
+cases with Enzyme.  
+
+# Model setup 
+
+## Model dependencies
 
 # Let's first add the necessary packages to run everything 
+=#
 
 import Pkg; Pkg.activate(".")
 using Enzyme
@@ -136,10 +137,11 @@ state_ref = vcat(fill(0.0°C,3),fill(0.0g/kg,3))
 
 # Here we define functions that will calculate quantities used in the forward steps.
 
-## function to compute transport
-##       Input: rho - the density vector
-##       Output: U - transport value 
-
+"""
+     function to compute transport
+       Input: rho - the density vector
+       Output: U - transport value 
+"""
 function U_func(ρ)
 
     U = u0*(ρ[2] - (δ * ρ[1] + (1 - δ)*ρ[3])) 
@@ -166,13 +168,14 @@ function rho_func(state)
 
 end
 
-## lastly our timestep function
-##       Input: fld_now = [T1(t), T2(t), ..., S3(t)]
-##           fld_old = [T1(t-dt), ..., S3(t-dt)]
-##           u = transport(t)
-##           dt = time step
-##       Output: fld_new = [T1(t+dt), ..., S3(t+dt)]
-
+"""
+     lastly our timestep function
+      Input: fld_now = [T1(t), T2(t), ..., S3(t)]
+          fld_old = [T1(t-dt), ..., S3(t-dt)]
+          u = transport(t)
+          dt = time step
+      Output: fld_new = [T1(t+dt), ..., S3(t+dt)]
+"""
 function timestep_func(fld_now, fld_old, u, dt)
 
     
@@ -206,22 +209,22 @@ function timestep_func(fld_now, fld_old, u, dt)
     ## update fldnew using a version of Euler's method  
 
     for j = 1:6
-        println(j)
         fld_new[j] = fld_old[j] + 2dt * temp[j] 
     end 
     
     return uconvert.(unit.(fld_old),fld_new) # affine units 
 end 
 
-## Define forward functions
+"""
+    Define forward functions
 
-# Finally, we create two functions, the first of which computes and stores all the 
-# states of the system, and the second which has been written specifically to be 
-# passed to Enzyme. 
+    Finally, we create two functions, the first of which computes and stores all the 
+    states of the system, and the second which has been written specifically to be 
+    passed to Enzyme. 
 
-# Let's start with the standard forward function. This is just going to be used
-# to store the states at every timestep:
-
+    Let's start with the standard forward function. This is just going to be used
+    to store the states at every timestep:
+"""
 function forward_func(fld_old, fld_now, dt, M)
 
     state_now = copy(fld_now)
@@ -254,22 +257,23 @@ function forward_func(fld_old, fld_now, dt, M)
     return states_smooth, states_unsmooth
 end
 
-# Next, we have the Enzyme-designed forward function. This is what we'll actually
-# be passing to Enzyme to differentiate: 
-
+"""
+     Next, we have the Enzyme-designed forward function. This is what we'll actually
+     be passing to Enzyme to differentiate: 
+"""
 function forward_func_4_AD(in_now, in_old, out_old, out_now)
 
-    ρ_now = ρ_func(in_now)                             ## compute density
+    ρ_now = rho_func(in_now)                             ## compute density
     u_now = U_func(ρ_now)                                ## compute transport 
     in_new = timestep_func(in_now, in_old, u_now, 10d)  ## compute new state values
 
     ## Robert filter smoother 
-    in_now[1] = in_now[1] + robert_filter_coeff * (in_new[1] - 2 * in_now[1] + in_old[1])
-    in_now[2] = in_now[2] + robert_filter_coeff * (in_new[2] - 2 * in_now[2] + in_old[2])
-    in_now[3] = in_now[3] + robert_filter_coeff * (in_new[3] - 2 * in_now[3] + in_old[3])
-    in_now[4] = in_now[4] + robert_filter_coeff * (in_new[4] - 2 * in_now[4] + in_old[4])
-    in_now[5] = in_now[5] + robert_filter_coeff * (in_new[5] - 2 * in_now[5] + in_old[5])
-    in_now[6] = in_now[6] + robert_filter_coeff * (in_new[6] - 2 * in_now[6] + in_old[6])
+    in_now[1] = in_now[1] + robert_filter_coeff * (in_new[1] - in_now[1] + in_old[1] - in_now[1])
+    in_now[2] = in_now[2] + robert_filter_coeff * (in_new[2] -  in_now[2] + in_old[2] -in_now[2])
+    in_now[3] = in_now[3] + robert_filter_coeff * (in_new[3] - in_now[3] + in_old[3] -in_now[3])
+    in_now[4] = in_now[4] + robert_filter_coeff * (in_new[4] - in_now[4] + in_old[4] - in_now[4])
+    in_now[5] = in_now[5] + robert_filter_coeff * (in_new[5] - in_now[5] + in_old[5] - in_now[5])
+    in_now[6] = in_now[6] + robert_filter_coeff * (in_new[6] - in_now[6] + in_old[6] - in_now[6])
 
     out_old[:] = in_now 
     out_now[:] = in_new
@@ -277,32 +281,40 @@ function forward_func_4_AD(in_now, in_old, out_old, out_now)
 
 end
 
-# Two key differences:
-# 1) `forward_func_4_AD` now returns nothing, but is rather a function of both its input
-#    and output.
-# 2) All operations are now inlined, meaning we compute the entries of the input vector
-#    individually.
-# Currently, Enzyme does not have compatibility with matrix/vector operations so inlining
-# is necessary to run Enzyme on this function. 
+#= Two key differences:
+1) `forward_func_4_AD` now returns nothing, but is rather a function of both its input
+   and output.
+2) All operations are now inlined, meaning we compute the entries of the input vector
+   individually.
+Currently, Enzyme does not have compatibility with matrix/vector operations so inlining
+is necessary to run Enzyme on this function. 
 
-# # Example 1: Simply using Enzyme
+# Example 1: Simply using Enzyme
 
-# For the first example let's just compute the gradient of our forward function and 
-# examine the output. We'll just run the model for one step, and take a `dt` of ten 
-# days. The initial conditions of the system are given as `Tbar` and `Sbar`. 
+For the first example let's just compute the gradient of our forward function and 
+examine the output. We'll just run the model for one step, and take a `dt` of ten 
+days. The initial conditions of the system are given as `Tbar` and `Sbar`. 
+=#
 
 T̄ = ([20.0; 1.0; 1.0])°C
 S̄ = ([35.5; 34.5; 34.5])g/kg
    
 ## Running the model one step forward
 Δt = 10d
-states_smooth, states_unsmooth = forward_func(copy([T̄; S̄]), copy([T̄; S̄]), Δt, 1)
+state_bar = copy([T̄; S̄])
+states_smooth, states_unsmooth = forward_func(state_bar, state_bar, Δt, 1)
     
 ## Run Enzyme one time on `forward_func_4_AD``
-din_now = zeros(6)
-din_old = zeros(6)
-out_now = zeros(6); dout_now = ones(6)
-out_old = zeros(6); dout_old = ones(6)
+
+# can't invert °C because it is affine
+d_units = vcat(fill(K^-1,3),fill(kg/g,3))
+din_now = zeros(6).*d_units
+din_old = zeros(6).*d_units
+out_now = zeros(6).*unit.(state_bar)
+dout_now = ones(6).*d_units
+out_old = zeros(6).*unit.(state_bar)
+dout_old = ones(6).*d_units
+
 autodiff(forward_func_4_AD, Duplicated([T̄; S̄], din_now), Duplicated([T̄; S̄], din_old), 
                     Duplicated(out_now, dout_now), Duplicated(out_old, dout_old));
 
