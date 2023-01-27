@@ -61,6 +61,7 @@
 
 # Let's first add the necessary packages to run everything 
 
+import Pkg; Pkg.activate(".")
 using Enzyme
 using Unitful
 
@@ -69,13 +70,27 @@ using Unitful
 # The system equations have quite a few constants that appear, here we initialize them 
 # for later use 
 
-const blength = [5000.0e5; 1000.0e5; 5000.0e5]   ## north-south size of boxes, centimeters
+const yr = u"yr"
+const d = u"d"
+const cm = u"cm"
+const g =u"g"
+const kg = u"kg"
+const °C = u"°C"
+const K = u"K"
+const m = u"m"
+const km = u"km"
+const m³ = m^3
+const s = u"s"
 
-const bdepth = [1.0e5; 5.0e5; 4.0e5]   ## depth of boxes, centimeters
+ENV["UNITFUL_FANCY_EXPONENTS"] = true
+
+const blength = ([5000.0; 1000.0; 5000.0])km   ## north-south size of boxes, centimeters
+
+const bdepth = ([1.0; 5.0; 4.0])km   ## depth of boxes, centimeters
   
-const delta = bdepth[1]/(bdepth[1] + bdepth[3])  ## constant ratio of two depths
+const δ = bdepth[1]/(bdepth[1] + bdepth[3])  ## constant ratio of two depths
 
-const bwidth = 4000.0*1e5  ## box width, centimeters
+const bwidth = 4000.0km  ## box width, centimeters
 
 ## box areas
 const barea = [blength[1]*bwidth;
@@ -89,28 +104,33 @@ const bvol = [barea[1]*bdepth[1];
 
 ## parameters that are used to ensure units are in CGS (cent-gram-sec)
 
-const hundred = 100.0
-const thousand = 1000.0
-const day = 3600.0*24.0
-const year = day*365.0
-const Sv = 1e12     ## one Sverdrup (a unit of ocean transport), 1e6 meters^3/second
+const hundred = 100
+const thousand = 1000
+module UnitfulOcean; using Unitful; @unit Sverdrup "Sv" Sverdrup (10^6)u"m^3/s" false; end
+Unitful.register(UnitfulOcean);
+Sv = u"Sverdrup"
 
 ## parameters that appear in box model equations
-const u0 = 16.0*Sv/0.0004
-const alpha = 1668e-7
-const beta = 0.7811e-3
-
-const gamma = 1/(300*day)
+uc = (16.0/0.004)
+u0 = (Sv/(g/cm^3))uc  # units error in Tziperman/Ioannou 2002
+α = 1668e-7(g/cm^3/K)
+β = 0.7811e-3*(g/cm^3)/(g/kg)
+γ = 1/(300d)
 
 ## robert filter coefficient for the smoother part of the timestep 
 const robert_filter_coeff = 0.25 
 
+S₀ = 35.0g/kg
+
 ## freshwater forcing
-const FW = [(hundred/year) * 35.0 * barea[1]; -(hundred/year) * 35.0 * barea[1]]
+FW = [(hundred/yr) * S₀ * barea[1]; -(hundred/yr) * S₀ * barea[1]] 
 
 ## restoring atmospheric temperatures
-const Tstar = [22.0; 0.0]
-const Sstar = [36.0; 34.0];
+T★ = ([22.0, 0.0])°C # J + \bigstar + TAB
+S★ = ([36.0; 34.0])g/kg 
+
+## handle equation of state and affine temperature units
+state_ref = vcat(fill(0.0°C,3),fill(0.0g/kg,3))
 
 # ## Define model functions 
 
@@ -120,26 +140,29 @@ const Sstar = [36.0; 34.0];
 ##       Input: rho - the density vector
 ##       Output: U - transport value 
 
-function U_func(dens)
+function U_func(ρ)
 
-    U = u0*(dens[2] - (delta * dens[1] + (1 - delta)*dens[3]))
-    return U
+    U = u0*(ρ[2] - (δ * ρ[1] + (1 - δ)*ρ[3])) 
+    return U |> Sv
 
 end
 
-## function to compute density
-##       Input: state = [T1; T2; T3; S1; S2; S3]
-##       Output: rho 
-
+"""
+ function to compute density
+       Input: state = [T1; T2; T3; S1; S2; S3]
+       Output: rho 
+"""
 function rho_func(state)
 
-    rho = zeros(3)
+    ρ = fill(0.0kg/m³,3)
 
-    rho[1] = -alpha * state[1] + beta * state[4]
-    rho[2] = -alpha * state[2] + beta * state[5]
-    rho[3] = -alpha * state[3] + beta * state[6]
+    # deal with kelvin, not degrees C
+    Δstate = state .- state_ref
+    ρ[1] = -α * Δstate[1] + β * Δstate[4]
+    ρ[2] = -α * Δstate[2] + β * Δstate[5]
+    ρ[3] = -α * Δstate[3] + β * Δstate[6]
 
-    return rho
+    return ρ
 
 end
 
@@ -152,24 +175,25 @@ end
 
 function timestep_func(fld_now, fld_old, u, dt)
 
-    temp = zeros(6)
-    fld_new = zeros(6)
+    
+    temp = zeros(6).*unit.(fld_now)
+    fld_new = zeros(6).*unit.(fld_now)
 
     ## first computing the time derivatives of the various temperatures and salinities
-    if u > 0 
+    if u > 0Sv
 
-        temp[1] = u * (fld_now[3] - fld_now[1]) / bvol[1] + gamma * (Tstar[1] - fld_now[1]) 
-        temp[2] = u * (fld_now[1] - fld_now[2]) / bvol[2] + gamma * (Tstar[2] - fld_now[2])
+        temp[1] = u * (fld_now[3] - fld_now[1]) / bvol[1] + γ * (T★[1] - fld_now[1]) 
+        temp[2] = u * (fld_now[1] - fld_now[2]) / bvol[2] + γ * (T★[2] - fld_now[2])
         temp[3] = u * (fld_now[2] - fld_now[3]) / bvol[3] 
 
         temp[4] = u * (fld_now[6] - fld_now[4]) / bvol[1] + FW[1] / bvol[1]
         temp[5] = u * (fld_now[4] - fld_now[5]) / bvol[2] + FW[2] / bvol[2]
         temp[6] = u * (fld_now[5] - fld_now[6]) / bvol[3]
         
-    elseif u <= 0
+    elseif u <= 0Sv
 
-        temp[1] = u * (fld_now[2] - fld_now[1]) / bvol[1] + gamma * (Tstar[1] - fld_now[1]) 
-        temp[2] = u * (fld_now[3] - fld_now[2]) / bvol[2] + gamma * (Tstar[2] - fld_now[2])
+        temp[1] = u * (fld_now[2] - fld_now[1]) / bvol[1] + γ * (T★[1] - fld_now[1]) 
+        temp[2] = u * (fld_now[3] - fld_now[2]) / bvol[2] + γ * (T★[2] - fld_now[2])
         temp[3] = u * (fld_now[1] - fld_now[3]) / bvol[3] 
 
         temp[4] = u * (fld_now[5] - fld_now[4]) / bvol[1] + FW[1] / bvol[1]
@@ -181,13 +205,13 @@ function timestep_func(fld_now, fld_old, u, dt)
     ## update fldnew using a version of Euler's method  
 
     for j = 1:6 
-        fld_new[j] = fld_old[j] + 2.0 * dt * temp[j] 
+        fld_new[j] = fld_old[j] + 2dt * temp[j] 
     end 
 
     return fld_new 
 end 
 
-# ## Define forward functions
+## Define forward functions
 
 # Finally, we create two functions, the first of which computes and stores all the 
 # states of the system, and the second which has been written specifically to be 
@@ -200,19 +224,19 @@ function forward_func(fld_old, fld_now, dt, M)
 
     state_now = copy(fld_now)
     state_old = copy(fld_old)
-    state_new = zeros(6)
+    state_new = zeros(6).*unit.(state_now)
 
-    states_unsmooth = [state_old];                      
+    states_unsmooth = [state_old]                      
     states_smooth = [state_old]
 
     for t = 1:M
-        rho_now = rho_func(state_now)
-        u_now = U_func(rho_now)
+        ρ_now = rho_func(state_now)
+        u_now = U_func(ρ_now)
         state_new = timestep_func(state_now, state_old, u_now, dt)
 
         ## Robert filter smoother (needed for stability)
         for j = 1:6
-            state_now[j] = state_now[j] + robert_filter_coeff * (state_new[j] - 2.0 * state_now[j] + state_old[j])
+            state_now[j] = state_now[j] + robert_filter_coeff * (state_new[j] - 2 * state_now[j] + state_old[j])
         end 
 
         push!(states_smooth, copy(state_now))
@@ -232,17 +256,17 @@ end
 
 function forward_func_4_AD(in_now, in_old, out_old, out_now)
 
-    rho_now = rho_func(in_now)                             ## compute density
-    u_now = U_func(rho_now)                                ## compute transport 
-    in_new = timestep_func(in_now, in_old, u_now, 10*day)  ## compute new state values
+    ρ_now = ρ_func(in_now)                             ## compute density
+    u_now = U_func(ρ_now)                                ## compute transport 
+    in_new = timestep_func(in_now, in_old, u_now, 10d)  ## compute new state values
 
     ## Robert filter smoother 
-    in_now[1] = in_now[1] + robert_filter_coeff * (in_new[1] - 2.0 * in_now[1] + in_old[1])
-    in_now[2] = in_now[2] + robert_filter_coeff * (in_new[2] - 2.0 * in_now[2] + in_old[2])
-    in_now[3] = in_now[3] + robert_filter_coeff * (in_new[3] - 2.0 * in_now[3] + in_old[3])
-    in_now[4] = in_now[4] + robert_filter_coeff * (in_new[4] - 2.0 * in_now[4] + in_old[4])
-    in_now[5] = in_now[5] + robert_filter_coeff * (in_new[5] - 2.0 * in_now[5] + in_old[5])
-    in_now[6] = in_now[6] + robert_filter_coeff * (in_new[6] - 2.0 * in_now[6] + in_old[6])
+    in_now[1] = in_now[1] + robert_filter_coeff * (in_new[1] - 2 * in_now[1] + in_old[1])
+    in_now[2] = in_now[2] + robert_filter_coeff * (in_new[2] - 2 * in_now[2] + in_old[2])
+    in_now[3] = in_now[3] + robert_filter_coeff * (in_new[3] - 2 * in_now[3] + in_old[3])
+    in_now[4] = in_now[4] + robert_filter_coeff * (in_new[4] - 2 * in_now[4] + in_old[4])
+    in_now[5] = in_now[5] + robert_filter_coeff * (in_new[5] - 2 * in_now[5] + in_old[5])
+    in_now[6] = in_now[6] + robert_filter_coeff * (in_new[6] - 2 * in_now[6] + in_old[6])
 
     out_old[:] = in_now 
     out_now[:] = in_new
@@ -264,18 +288,19 @@ end
 # examine the output. We'll just run the model for one step, and take a `dt` of ten 
 # days. The initial conditions of the system are given as `Tbar` and `Sbar`. 
 
-const Tbar = [20.0; 1.0; 1.0]
-const Sbar = [35.5; 34.5; 34.5]
+T̄ = ([20.0; 1.0; 1.0])°C
+S̄ = ([35.5; 34.5; 34.5])g/kg
    
 ## Running the model one step forward
-states_smooth, states_unsmooth = forward_func(copy([Tbar; Sbar]), copy([Tbar; Sbar]), 10*day, 1)
+Δt = 10d
+states_smooth, states_unsmooth = forward_func(copy([T̄; S̄]), copy([T̄; S̄]), Δt, 1)
     
 ## Run Enzyme one time on `forward_func_4_AD``
 din_now = zeros(6)
 din_old = zeros(6)
 out_now = zeros(6); dout_now = ones(6)
 out_old = zeros(6); dout_old = ones(6)
-autodiff(forward_func_4_AD, Duplicated([Tbar; Sbar], din_now), Duplicated([Tbar; Sbar], din_old), 
+autodiff(forward_func_4_AD, Duplicated([T̄; S̄], din_now), Duplicated([T̄; S̄], din_old), 
                     Duplicated(out_now, dout_now), Duplicated(out_old, dout_old));
 
 # In order to run Enzyme on `forward_func_4_AD`, we've needed to provide quite a few 
@@ -309,9 +334,9 @@ autodiff(forward_func_4_AD, Duplicated([Tbar; Sbar], din_now), Duplicated([Tbar;
 
 din_now_new = zeros(6)
 din_old_new = zeros(6)
-out_now = zeros(6); dout_now = 2*ones(6)
-out_old = zeros(6); dout_old = 2*ones(6)
-autodiff(forward_func_4_AD, Duplicated([Tbar; Sbar], din_now_new), Duplicated([Tbar; Sbar], din_old_new), 
+out_now = zeros(6); dout_now = fill(2,6) 
+out_old = zeros(6); dout_old = fill(2,6)
+autodiff(forward_func_4_AD, Duplicated([T̄; S̄], din_now_new), Duplicated([T̄; S̄], din_old_new), 
                     Duplicated(out_now, dout_now), Duplicated(out_old, dout_old));
 
 # Now checking din_now_new and din_old_new we see
@@ -387,7 +412,7 @@ end
 
 const M = 10000             ## Deciding on total number of forward steps to take
 
-states_smooth, states_unsmooth = forward_func(copy([Tbar; Sbar]), copy([Tbar; Sbar]), 10*day, M);   
+states_smooth, states_unsmooth = forward_func(copy([T̄; S̄]), copy([T̄; S̄]), 10*day, M);   
 
 # Next, we pass all of our states to the AD function to get back to the desired derivative:
 
@@ -423,20 +448,20 @@ use_to_check = states_smooth[M+1]
 diffs = []
 step_sizes = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5, 1e-6, 1e-7, 1e-8, 1e-9, 1e-10]
 for eps in step_sizes
-    new1 = Tbar 
-    new2 = Sbar + [0.0;eps;0.0]
+    new1 = T̄
+    new2 = S̄ + ([0.0;eps;0.0])g/kg
     state_old = [new1; new2];     
-    state_new = zeros(6);                             
-    state_now = [Tbar; Sbar];
+    state_new = zeros(6).*[°C,°C,°C,g/kg,g/kg,g/kg]                             
+    state_now = [T̄; S̄];
 
     for t = 1:M
 
-        rho_now = rho_func(state_now)
-        u_now = U_func(rho_now)
-        state_new = timestep_func(state_now, state_old, u_now, 10*day)
+        ρ_now = ρ_func(state_now)
+        u_now = U_func(ρ_now)
+        state_new = timestep_func(state_now, state_old, u_now, 10d)
 
         for j = 1:6
-            state_now[j] = state_now[j] + robert_filter_coeff * (state_new[j] - 2.0 * state_now[j] + state_old[j])
+            state_now[j] = state_now[j] + robert_filter_coeff * (state_new[j] - 2 * state_now[j] + state_old[j])
         end 
 
         state_old = state_now 
