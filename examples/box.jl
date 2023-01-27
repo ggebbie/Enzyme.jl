@@ -122,8 +122,8 @@ const robert_filter_coeff = 0.25
 
 S₀ = 35.0g/kg
 
-## freshwater forcing
-FW = [(hundred/yr) * S₀ * barea[1]; -(hundred/yr) * S₀ * barea[1]] 
+## freshwater forcing, convert to useful units as well
+FW = (Sv*g/kg).([100.0cm/yr * S₀ * barea[1]; -100.0cm/yr * S₀ * barea[1]])
 
 ## restoring atmospheric temperatures
 T★ = ([22.0, 0.0])°C # J + \bigstar + TAB
@@ -189,11 +189,12 @@ function timestep_func(fld_now, fld_old, u, dt)
         temp[4] = u * (fld_now[6] - fld_now[4]) / bvol[1] + FW[1] / bvol[1]
         temp[5] = u * (fld_now[4] - fld_now[5]) / bvol[2] + FW[2] / bvol[2]
         temp[6] = u * (fld_now[5] - fld_now[6]) / bvol[3]
-        
+
     elseif u <= 0Sv
 
         temp[1] = u * (fld_now[2] - fld_now[1]) / bvol[1] + γ * (T★[1] - fld_now[1]) 
         temp[2] = u * (fld_now[3] - fld_now[2]) / bvol[2] + γ * (T★[2] - fld_now[2])
+
         temp[3] = u * (fld_now[1] - fld_now[3]) / bvol[3] 
 
         temp[4] = u * (fld_now[5] - fld_now[4]) / bvol[1] + FW[1] / bvol[1]
@@ -204,11 +205,12 @@ function timestep_func(fld_now, fld_old, u, dt)
 
     ## update fldnew using a version of Euler's method  
 
-    for j = 1:6 
+    for j = 1:6
+        println(j)
         fld_new[j] = fld_old[j] + 2dt * temp[j] 
     end 
-
-    return fld_new 
+    
+    return uconvert.(unit.(fld_old),fld_new) # affine units 
 end 
 
 ## Define forward functions
@@ -235,8 +237,9 @@ function forward_func(fld_old, fld_now, dt, M)
         state_new = timestep_func(state_now, state_old, u_now, dt)
 
         ## Robert filter smoother (needed for stability)
+        # re-arrange to accommodate affine quantities
         for j = 1:6
-            state_now[j] = state_now[j] + robert_filter_coeff * (state_new[j] - 2 * state_now[j] + state_old[j])
+            state_now[j] = state_now[j] + robert_filter_coeff * ((state_new[j] - state_now[j]) + (state_old[j]- state_now[j]))
         end 
 
         push!(states_smooth, copy(state_now))
