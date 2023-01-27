@@ -315,6 +315,14 @@ dout_now = ones(6).*d_units
 out_old = zeros(6).*unit.(state_bar)
 dout_old = ones(6).*d_units
 
+#=
+# `autodiff` tuple error with quantities
+
+unitful quantities: forward model fine
+
+autodiff: fails with "not a tuple" error
+=#
+
 autodiff(forward_func_4_AD, Duplicated([T̄; S̄], din_now), Duplicated([T̄; S̄], din_old), 
                     Duplicated(out_now, dout_now), Duplicated(out_old, dout_old));
 
